@@ -235,6 +235,31 @@ static void disk_submit (const char *plugin_instance,
 	plugin_dispatch_values (&vl);
 } /* void disk_submit */
 
+#if defined(KERNEL_LINUX) || defined(HAVE_PERFSTAT)
+static void disk_submit_derive (const char *plugin_instance,
+               const char *type, derive_t derive)
+{
+	value_t values[1];
+	value_list_t vl = VALUE_LIST_INIT;
+
+	/* Both `ignorelist' and `plugin_instance' may be NULL. */
+	if (ignorelist_match (ignorelist, plugin_instance) != 0)
+		return;
+
+	values[0].derive = derive;
+
+	vl.values = values;
+	vl.values_len = 1;
+	sstrncpy (vl.host, hostname_g, sizeof (vl.host));
+	sstrncpy (vl.plugin, "disk", sizeof (vl.plugin));
+	sstrncpy (vl.plugin_instance, plugin_instance,
+		sizeof (vl.plugin_instance));
+	sstrncpy (vl.type, type, sizeof (vl.type));
+
+	plugin_dispatch_values (&vl);
+} /* void disk_submit_counter */
+#endif
+
 #if HAVE_IOKIT_IOKITLIB_H
 static signed long long dict_get_value (CFDictionaryRef dict, const char *key)
 {
@@ -437,6 +462,9 @@ static int disk_read (void)
 	derive_t write_ops     = 0;
 	derive_t write_merged  = 0;
 	derive_t write_time    = 0;
+
+	derive_t util_time     = 0;
+
 	int is_disk = 0;
 
 	diskstats_t *ds, *pre_ds;
@@ -512,6 +540,7 @@ static int disk_read (void)
 				read_time    = atoll (fields[6 + fieldshift]);
 				write_merged = atoll (fields[8 + fieldshift]);
 				write_time   = atoll (fields[10+ fieldshift]);
+				util_time    = atoll (fields[12+ fieldshift]);
 			}
 		}
 		else
@@ -626,6 +655,8 @@ static int disk_read (void)
 		{
 			disk_submit (disk_name, "disk_merged",
 					read_merged, write_merged);
+			disk_submit_derive (disk_name, "disk_util",
+					util_time);
 		} /* if (is_disk) */
 	} /* while (fgets (buffer, sizeof (buffer), fh) != NULL) */
 
@@ -747,6 +778,11 @@ static int disk_read (void)
 		write_time = stat_disk[i].wserv;
 		write_time *= ((double)(_system_configuration.Xint)/(double)(_system_configuration.Xfrac)) / 1000000.0;
 		disk_submit (stat_disk[i].name, "disk_time", read_time, write_time);
+
+		disk_submit_derive (disk_name, "disk_util",
+			stat_disk[i].time);
+		disk_submit_derive (disk_name, "disk_qfull",
+			stat_disk[i].q_full);
 	}
 #endif /* defined(HAVE_PERFSTAT) */
 
